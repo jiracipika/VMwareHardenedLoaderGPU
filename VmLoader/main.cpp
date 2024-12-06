@@ -4,58 +4,90 @@
 #include <set>
 #include <Windows.h>
 #include <d3d11.h>
+#include <Windows.h>
+#include <d3d11.h>
+#include <dxgi.h>
+#include <iostream>
 
 typedef HRESULT(WINAPI* IDXGIAdapter_GetDesc_t)(IDXGIAdapter*, DXGI_ADAPTER_DESC*);
 
+// Pointer to store the original function
 IDXGIAdapter_GetDesc_t pOriginalIDXGIAdapter_GetDesc = nullptr;
 
 // Hook function
 HRESULT WINAPI Hook_IDXGIAdapter_GetDesc(IDXGIAdapter* pAdapter, DXGI_ADAPTER_DESC* pDesc)
 {
-    // Return information to emulate an RX 580 8GB
-    pDesc->Description = L"AMD Radeon RX 580 8GB";
-    pDesc->VendorId = 0x1002;
-    pDesc->DeviceId = 0x67B0;
-    pDesc->SubSysId = 0x0000;
-    pDesc->Revision = 0;
-    pDesc->DedicatedVideoMemory = 8192;
-    pDesc->DedicatedSystemMemory = 0;
-    pDesc->SharedSystemMemory = 0;
-    pDesc->AdapterLuid.LowPart = 0;
-    pDesc->AdapterLuid.HighPart = 0;
-    return S_OK;
+    std::wcout << L"Hooked IDXGIAdapter::GetDesc called!" << std::endl;
+
+    // Call the original function
+    HRESULT hr = pOriginalIDXGIAdapter_GetDesc(pAdapter, pDesc);
+
+    if (SUCCEEDED(hr)) {
+        // Modify the description to emulate an RX 580 8GB
+        wcscpy_s(pDesc->Description, L"AMD Radeon RX 580 8GB");
+        pDesc->VendorId = 0x1002; // AMD's Vendor ID
+        pDesc->DeviceId = 0x67B0; // RX 580 Device ID
+        pDesc->DedicatedVideoMemory = 8192 * 1024 * 1024; // 8 GB VRAM
+    }
+
+    return hr;
+}
+
+void HookIDXGIAdapterGetDesc(IDXGIAdapter* pAdapter)
+{
+    // Get the vtable for the IDXGIAdapter object
+    uintptr_t* pVTable = *(uintptr_t**)pAdapter;
+
+    // Save the original GetDesc function pointer
+    pOriginalIDXGIAdapter_GetDesc = (IDXGIAdapter_GetDesc_t)pVTable[3];
+
+    // Replace the vtable entry with our hook function
+    DWORD oldProtect;
+    VirtualProtect(&pVTable[3], sizeof(uintptr_t), PAGE_EXECUTE_READWRITE, &oldProtect);
+    pVTable[3] = (uintptr_t)Hook_IDXGIAdapter_GetDesc;
+    VirtualProtect(&pVTable[3], sizeof(uintptr_t), oldProtect, &oldProtect);
 }
 
 int main()
 {
-    // Get the address of the original IDXGIAdapter::GetDesc function
-    HMODULE hD3D11_dll = LoadLibraryA("d3d11.dll");
-    if (!hD3D11_dll)
-    {
-        // Handle error
+    HRESULT hr;
+
+    // Initialize DXGI Factory
+    IDXGIFactory* pFactory = nullptr;
+    hr = CreateDXGIFactory(__uuidof(IDXGIFactory), (void**)&pFactory);
+    if (FAILED(hr)) {
+        std::cerr << "Failed to create DXGI Factory!" << std::endl;
         return 1;
     }
 
-    pOriginalIDXGIAdapter_GetDesc = (IDXGIAdapter_GetDesc_t)GetProcAddress(hD3D11_dll, "IDXGIAdapter_GetDesc");
-    if (!pOriginalIDXGIAdapter_GetDesc)
-    {
-        // Handle error
+    // Get the first adapter
+    IDXGIAdapter* pAdapter = nullptr;
+    hr = pFactory->EnumAdapters(0, &pAdapter);
+    if (FAILED(hr)) {
+        std::cerr << "Failed to enumerate adapters!" << std::endl;
+        pFactory->Release();
         return 1;
     }
 
-    // Set up the hook
-    // ...
+    // Hook the GetDesc function
+    HookIDXGIAdapterGetDesc(pAdapter);
 
-    // Call the original IDXGIAdapter::GetDesc function
-    IDXGIAdapter* pAdapter = /* get the IDXGIAdapter interface */;
+    // Test the hook
     DXGI_ADAPTER_DESC desc;
-    HRESULT hr = pOriginalIDXGIAdapter_GetDesc(pAdapter, &desc);
+    hr = pAdapter->GetDesc(&desc);
+    if (SUCCEEDED(hr)) {
+        std::wcout << L"Adapter Description: " << desc.Description << std::endl;
+        std::wcout << L"Vendor ID: " << std::hex << desc.VendorId << std::endl;
+        std::wcout << L"Device ID: " << std::hex << desc.DeviceId << std::endl;
+    }
 
-    // Clean up
-    // ...
+    // Cleanup
+    pAdapter->Release();
+    pFactory->Release();
 
     return 0;
 }
+
 extern "C"
 {
 	PVOID g_NtosBase = NULL;
