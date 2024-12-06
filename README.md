@@ -115,4 +115,6 @@ https://github.com/aquynh/capstone is used to disasm ntoskrnl code.
 
 ## TODO
 
-VMware virtual graphic card information could be detected by querying DXGI interface, which could be modified by editing graphic driver files.
+**VMware virtual graphic card information could be detected by querying DXGI interface, which could be modified by editing graphic driver files.**
+completed via hook and intercept calls to the IDXGIAdapter::GetDesc from DXGI, will not provide full solution for obvious reasons.
+
